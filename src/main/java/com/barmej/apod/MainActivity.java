@@ -3,7 +3,6 @@ package com.barmej.apod;
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
-import androidx.core.content.FileProvider;
 import androidx.fragment.app.FragmentManager;
 
 import android.Manifest;
@@ -12,24 +11,19 @@ import android.app.DatePickerDialog;
 import android.app.DownloadManager;
 import android.content.Context;
 import android.content.Intent;
-import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
-import android.graphics.Bitmap;
+import android.content.res.Configuration;
 import android.graphics.Color;
-import android.graphics.Matrix;
-import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.ColorDrawable;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
-import android.provider.MediaStore;
 import android.util.Log;
 import android.view.Menu;
 import android.view.MenuInflater;
 import android.view.MenuItem;
 import android.view.View;
-import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowManager;
 import android.webkit.WebChromeClient;
@@ -42,30 +36,23 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import com.android.volley.Request;
-import com.android.volley.RequestQueue;
 import com.android.volley.Response;
 import com.android.volley.VolleyError;
 import com.android.volley.toolbox.StringRequest;
-import com.android.volley.toolbox.Volley;
 import com.barmej.apod.fragments.AboutFragments;
+import com.barmej.apod.network.NetworkUtils;
 import com.ortiz.touchview.TouchImageView;
 import com.squareup.picasso.Picasso;
 
 import org.json.JSONException;
 import org.json.JSONObject;
 
-import java.io.ByteArrayOutputStream;
-import java.io.File;
-import java.io.FileOutputStream;
-import java.io.IOException;
 import java.util.Calendar;
-import java.util.HashMap;
-import java.util.Map;
 
 public class MainActivity extends AppCompatActivity {
 
-    private RequestQueue mRequestQueue;
-    private String url="https://api.nasa.gov/planetary/apod?api_key=fSL8o6mGokdxfCwo0yYhHonqU9XzKoM5lrfa3HlW";
+    private static final int WRITE_EXTERNAL_STORAGE_PERMISSION_CODE = 100;
+    public static final String TAG=MainActivity.class.getSimpleName();
     private String dateEndPoint="";
     private String hdUrl="";
     private TouchImageView picView;
@@ -75,9 +62,13 @@ public class MainActivity extends AppCompatActivity {
     private TextView titleText,detailText;
     private JSONObject jsonObject;
     private boolean havePermission;
-    final Calendar myCalendar = Calendar.getInstance();
-    DatePicker simpleDatePicker;
-    DatePickerDialog.OnDateSetListener date;
+    private final Calendar myCalendar = Calendar.getInstance();
+    private DatePicker simpleDatePicker;
+    private DatePickerDialog.OnDateSetListener date;
+    private NetworkUtils mNetworkUtils;
+    String imgUri;
+    private boolean isVideo=false;
+
 
 
     @Override
@@ -85,9 +76,9 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
         setUpView();
-        mRequestQueue= Volley.newRequestQueue(this);
-        requestAstronomyData(url);
-        havePermission =haveStoragePermission();
+        mNetworkUtils= NetworkUtils.getInstance(this);
+        requestAstronomyData(mNetworkUtils.getAstronomyUri());
+        checkPermission();
 
     }
 
@@ -104,34 +95,34 @@ public class MainActivity extends AppCompatActivity {
 
     private void requestAstronomyData(final String url) {
 
+
         StringRequest astronomyRequest= new StringRequest(Request.Method.GET, url, new Response.Listener<String>() {
             @Override
             public void onResponse(String response) {
 
                 try {
-                     jsonObject=new JSONObject(response);
+                    jsonObject=new JSONObject(response);
                     if(jsonObject.getString("media_type").equals("image")){
                         if(video.getVisibility()==View.VISIBLE)
                         {
                             video.setVisibility(View.GONE);
                             picView.setVisibility(View.VISIBLE);}
-                        Picasso.get().load(jsonObject.getString("url")).into(picView);
-                        hdUrl=jsonObject.getString("hdurl");
+                            Picasso.get().load(jsonObject.getString("url")).into(picView);
+                            hdUrl=jsonObject.getString("hdurl");
                     }
                     else
                     {
-                        if(picView.getVisibility()==View.VISIBLE)
-                        {
-                            picView.setVisibility(View.GONE);
-                            video.setVisibility(View.VISIBLE);}
+                        isVideo=true;
+                        picView.setVisibility(View.GONE);
+                        video.setVisibility(View.VISIBLE);
                         picView.setVisibility(View.GONE);
                         video.setVisibility(View.VISIBLE);
                         video.getSettings().setJavaScriptEnabled(true);
                         video.getSettings().setPluginState(WebSettings.PluginState.ON);
                         video.loadUrl(jsonObject.getString("url"));
                         video.setWebChromeClient(new WebChromeClient());                    }
-                    titleText.setText(jsonObject.getString("title"));
-                    detailText.setText(jsonObject.getString("explanation"));
+                        titleText.setText(jsonObject.getString("title"));
+                        detailText.setText(jsonObject.getString("explanation"));
 
                 } catch (JSONException e) {
                     e.printStackTrace();
@@ -144,8 +135,8 @@ public class MainActivity extends AppCompatActivity {
                  Toast.makeText(getApplicationContext(),error.toString(),Toast.LENGTH_LONG).show();
             }
         });
-
-        mRequestQueue.add(astronomyRequest);
+        astronomyRequest.setTag(TAG);
+        mNetworkUtils.addToRequestQueue(astronomyRequest);
     }
 
 
@@ -153,6 +144,7 @@ public class MainActivity extends AppCompatActivity {
     public boolean onCreateOptionsMenu(Menu menu) {
         MenuInflater inflater=getMenuInflater();
         inflater.inflate(R.menu.main_menu,menu);
+
         return true;
     }
 
@@ -163,9 +155,10 @@ public class MainActivity extends AppCompatActivity {
             ShowDatePickerDialog();
             return true;
         }
-        if(item.getItemId()==R.id.action_download_hd)
+        if(item.getItemId()==R.id.action_download_hd )
         {
-            DownloadHD();
+            if(isVideo)Toast.makeText(MainActivity.this,"OOps..Video Download Is Not Supported ",Toast.LENGTH_LONG).show();
+            else DownloadHD();
             return true;
 
         }if(item.getItemId()==R.id.action_share)
@@ -184,11 +177,12 @@ public class MainActivity extends AppCompatActivity {
     }
 
 
+
     private void ShareFile() {
 
-        PackageManager pm = getApplicationContext().getPackageManager();
+       // PackageManager pm = getApplicationContext().getPackageManager();
         try {
-            ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+           /* ByteArrayOutputStream bytes = new ByteArrayOutputStream();
             Matrix matrix = new Matrix();
             matrix.postRotate(90);
             Bitmap lineABmp = ((BitmapDrawable)picView.getDrawable()).getBitmap();
@@ -196,28 +190,29 @@ public class MainActivity extends AppCompatActivity {
             Bitmap tempBitmap =Bitmap.createBitmap(copy, 0, 0, copy.getWidth(), copy.getHeight(), matrix, true);
             tempBitmap.compress(Bitmap.CompressFormat.JPEG, 100, bytes);
             String path = MediaStore.Images.Media.insertImage(getApplicationContext().getContentResolver(), tempBitmap, "Title", null);
-            Uri imageUri = Uri.parse(path);
+           */
+            Uri imageUri = Uri.parse(hdUrl);
 
             @SuppressWarnings("unused")
-            PackageInfo info = pm.getPackageInfo("com.whatsapp", PackageManager.GET_META_DATA);
+          //  PackageInfo info = pm.getPackageInfo("com.whatsapp", PackageManager.GET_META_DATA);
 
-            Intent waIntent = new Intent(Intent.ACTION_SEND);
-            waIntent.setType("image/*");
-            //waIntent.setPackage("com.whatsapp");
-            waIntent.putExtra(android.content.Intent.EXTRA_STREAM, imageUri);
-            waIntent.putExtra(Intent.EXTRA_TEXT, "My Photo");
-            startActivity(Intent.createChooser(waIntent, "Share with"));
+            Intent shareIntent = new Intent(Intent.ACTION_SEND);
+            shareIntent.setType("image/*");
+            shareIntent.putExtra(android.content.Intent.EXTRA_STREAM, imageUri);
+            shareIntent.putExtra(Intent.EXTRA_TEXT, "My Photo");
+            startActivity(Intent.createChooser(shareIntent, "Share with"));
 
         } catch (Exception e) {
             Log.e("Error on sharing", e + " ");
-            Toast.makeText(getApplicationContext(), "please check the text ", Toast.LENGTH_SHORT).show();
+            Toast.makeText(getApplicationContext(),e.toString(), Toast.LENGTH_LONG).show();
         }
     }
 
     private void DownloadHD() {
 
         if (havePermission)
-        { DownloadManager downloadManager = (DownloadManager) getSystemService(Context.DOWNLOAD_SERVICE);
+        {
+        DownloadManager downloadManager = (DownloadManager) getSystemService(Context.DOWNLOAD_SERVICE);
         Uri uri= Uri.parse(hdUrl);
         DownloadManager.Request request = new DownloadManager.Request(uri);
         // set title and description
@@ -238,49 +233,68 @@ public class MainActivity extends AppCompatActivity {
 
     private void ShowDatePickerDialog() {
 
+        Calendar cal = Calendar.getInstance();
+        int year = cal.get(Calendar.YEAR); // get the current year
+        int month = cal.get(Calendar.MONTH); // month...
+        int day = cal.get(Calendar.DAY_OF_MONTH); // current day in the month
         DatePickerDialog datePickerDialog=new DatePickerDialog(MainActivity.this, new DatePickerDialog.OnDateSetListener() {
             @Override
             public void onDateSet(DatePicker datePicker, int i, int i1, int i2) {
          // Toast.makeText(MainActivity.this,i+"/"+i1+"/"+i2,Toast.LENGTH_LONG).show();
-         dateEndPoint=url+"&date="+i+"-"+i1+"-"+i2;
+         dateEndPoint=mNetworkUtils.getAstronomyUri()+"&date="+i+"-"+i1+"-"+i2;
          requestAstronomyData(dateEndPoint);
             }
-        },2019,8,01);
+        },year,month,day);
         datePickerDialog.show();
     }
 
 
-    public  boolean haveStoragePermission() {
-        if (Build.VERSION.SDK_INT >= 23) {
+    public  void checkPermission() {
+
             if (checkSelfPermission(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
                     == PackageManager.PERMISSION_GRANTED) {
-                Log.e("Permission error","You have permission");
-                return true;
+                Toast.makeText(MainActivity.this, "Permission already granted", Toast.LENGTH_SHORT).show();
             } else {
-
-                Log.e("Permission error","You have asked for permission");
-                ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE}, 1);
-                return false;
+                //Log.e("Permission error","You have asked for permission");
+                ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE}, WRITE_EXTERNAL_STORAGE_PERMISSION_CODE);
             }
-        }
-        else { //you dont need to worry about these stuff below api level 23
-            Log.e("Permission error","You already have the permission");
-            return true;
-        }
     }
 
+    // This function is called when the user accepts or decline the permission.
+    // Request Code is used to check which permission called this function.
+    // This request code is provided when the user is prompt for permission.
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode,
+                                           @NonNull String[] permissions,
+                                           @NonNull int[] grantResults)
+    {
+        super.onRequestPermissionsResult(requestCode,
+                permissions,
+                grantResults);
+
+        if (requestCode == WRITE_EXTERNAL_STORAGE_PERMISSION_CODE) {
+            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                havePermission=true;
+                Toast.makeText(MainActivity.this, "Write External Storage Permission Granted", Toast.LENGTH_SHORT) .show();
+            }
+            else {
+                Toast.makeText(MainActivity.this, "Write External Storage Denied", Toast.LENGTH_SHORT) .show();
+            }
+        }
+
+    }
 
     private void showAlertDialog() {
         FragmentManager fm = getSupportFragmentManager();
-        AboutFragments alertDialog = new AboutFragments();
-        AlertDialog builder = new AlertDialog.Builder(this).create();
-        View view=findViewById(R.id.img_nasa);
-        builder.setView(view);
-        Window window = builder.getWindow();
-        window.setLayout(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.WRAP_CONTENT);
-        window.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
-        window.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
-        builder.show();
-        alertDialog.show(fm, "fragment_alert");
+        AboutFragments aboutFragment = new AboutFragments();
+        aboutFragment.show(fm, "fragment_alert");
+
+    }
+
+    @Override
+    public void onConfigurationChanged(Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+
     }
 }

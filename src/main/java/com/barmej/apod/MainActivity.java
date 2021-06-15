@@ -227,7 +227,7 @@ public class MainActivity extends AppCompatActivity {
         request.setMimeType("*/*");
         downloadManager.enqueue(request);}
         else{
-            Toast.makeText(MainActivity.this,"error",Toast.LENGTH_LONG).show();
+            Toast.makeText(MainActivity.this,"error"+havePermission,Toast.LENGTH_LONG).show();
         }
     }
 
@@ -253,6 +253,7 @@ public class MainActivity extends AppCompatActivity {
 
             if (checkSelfPermission(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
                     == PackageManager.PERMISSION_GRANTED) {
+                havePermission=true;
                 Toast.makeText(MainActivity.this, "Permission already granted", Toast.LENGTH_SHORT).show();
             } else {
                 //Log.e("Permission error","You have asked for permission");
